@@ -4,25 +4,23 @@ import logging
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
-# Логи для Render, чтобы видеть, если что-то сломается
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Токен скрыт, он автоматически подтянется из панели управления Render
 TOKEN = os.getenv("TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Состояния
+# Состояния FSM
 class PlannerStates(StatesGroup):
     waiting_for_tasks = State()
 
-# Буфер для временного хранения списка в рамках сессии
 user_tasks = {}
 
 # Клавиатуры
@@ -48,8 +46,7 @@ async def back_to_main(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Главное меню:", reply_markup=main_kb)
 
-# --- ЛОГИКА ДНЯ (ТЕКСТОВЫЙ СПИСОК) ---
-
+# --- ЛОГИКА ДНЯ ---
 @dp.message(F.text == "День")
 async def start_day_planner(message: types.Message, state: FSMContext):
     await state.set_state(PlannerStates.waiting_for_tasks)
@@ -60,7 +57,6 @@ async def start_day_planner(message: types.Message, state: FSMContext):
 async def process_day_tasks(message: types.Message, state: FSMContext):
     if message.text == "Это всё":
         tasks = user_tasks.get(message.from_user.id, [])
-        
         async with aiosqlite.connect("tasks.db") as db:
             await db.execute("DELETE FROM tasks")
             for task in tasks:
@@ -70,7 +66,6 @@ async def process_day_tasks(message: types.Message, state: FSMContext):
         text = "Твои цели на день:\n\n"
         for i, task in enumerate(tasks, 1):
             text += f"{i}. {task}\n"
-        
         await message.answer(text, reply_markup=main_kb)
         await state.clear()
     else:
@@ -91,7 +86,6 @@ async def list_tasks(message: types.Message):
     for i, row in enumerate(rows, 1):
         status = "✅" if row[2] else "❌"
         text += f"{i}. {row[1]} {status}\n"
-    
     await message.answer(text + "\nДля отметки напиши: /done номер")
 
 @dp.message(Command("done"))
@@ -109,23 +103,28 @@ async def mark_done(message: types.Message):
     except:
         await message.answer("Ошибка. Напиши: /done номер")
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (Чтобы бот не засыпал) ---
+# --- Исправленный веб-сервер ---
 async def handle(request):
     return web.Response(text="Bot is running smoothly 24/7!")
 
-async def web_server():
+async def main():
+    await init_db()
+    
+    # Конфигурируем веб-приложение
     app = web.Application()
     app.router.add_get('/', handle)
+    
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 10000)
     await site.start()
+    logging.info("Веб-сервер запущен на порту 10000")
 
-async def main():
-    await init_db()
-    await web_server()
-    logging.info("Бот и веб-сервер успешно запущены...")
-    await dp.start_polling(bot)
+    # Запускаем бота параллельно серверу
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
