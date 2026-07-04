@@ -14,6 +14,11 @@ from aiohttp import web
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("TOKEN")
+# Берем URL от Render из настроек или используем твой прямой адрес
+BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://aiogram-aiosqlite.onrender.com")
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+WEBHOOK_URL = f"{BASE_URL}{WEBHOOK_PATH}"
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -103,28 +108,36 @@ async def mark_done(message: types.Message):
     except:
         await message.answer("Ошибка. Напиши: /done номер")
 
-# --- Исправленный веб-сервер ---
-async def handle(request):
-    return web.Response(text="Bot is running smoothly 24/7!")
+# --- ОБРАБОТКА ВЕБХУКА ---
+async def handle_webhook(request):
+    text = await request.text()
+    update = types.Update.model_validate_json(text)
+    await dp.feed_update(bot, update)
+    return web.Response(text="OK")
 
-async def main():
+async def handle_root(request):
+    return web.Response(text="Бот активен и готов к работе!")
+
+async def on_startup(app):
     await init_db()
-    
-    # Конфигурируем веб-приложение
-    app = web.Application()
-    app.router.add_get('/', handle)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 10000)
-    await site.start()
-    logging.info("Веб-сервер запущен на порту 10000")
+    # Регистрируем вебхук в Telegram
+    await bot.set_webhook(WEBHOOK_URL)
+    logging.info(f"Вебхук успешно установлен на: {WEBHOOK_URL}")
 
-    # Запускаем бота параллельно серверу
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+async def on_shutdown(app):
+    # Удаляем вебхук при выключении
+    await bot.delete_webhook()
+    await bot.session.close()
+
+def main():
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, handle_webhook)
+    app.router.add_get('/', handle_root)
+    
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    
+    web.run_app(app, host='0.0.0.0', port=10000)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
