@@ -1,4 +1,6 @@
 import asyncio
+import os
+import logging
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -6,8 +8,13 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import web
 
-TOKEN = "8924930313:AAFYi-H9Z_1678irEDh2fyqrdYrutnt0l9M"
+# Логи для Render, чтобы видеть, если что-то сломается
+logging.basicConfig(level=logging.INFO)
+
+# Токен скрыт, он автоматически подтянется из панели управления Render
+TOKEN = os.getenv("TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -98,14 +105,26 @@ async def mark_done(message: types.Message):
                     await db.execute("UPDATE tasks SET done = 1 WHERE id = ?", (row[0],))
                     await db.commit()
                     await message.answer("Отметил!")
-                    # Вызываем функцию списка заново для обновления
                     await list_tasks(message)
     except:
         await message.answer("Ошибка. Напиши: /done номер")
 
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (Чтобы бот не засыпал) ---
+async def handle(request):
+    return web.Response(text="Bot is running smoothly 24/7!")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+
 async def main():
     await init_db()
-    print("Бот запущен...")
+    await web_server()
+    logging.info("Бот и веб-сервер успешно запущены...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
