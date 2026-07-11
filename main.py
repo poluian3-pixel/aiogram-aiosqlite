@@ -177,7 +177,8 @@ async def handle_webhook(request):
     return web.Response(text="OK")
 
 async def handle_ping(request):
-    return web.Response(text="I am alive!")
+    # Возвращаем статус 200 и пустой текст, чтобы не было никаких лишних данных
+    return web.Response(status=200)
 
 async def on_startup(app):
     webhook_url = f"{os.getenv('RENDER_EXTERNAL_URL')}/{TOKEN}"
