@@ -63,6 +63,70 @@ async def back_to_main(message: types.Message, state: FSMContext):
 @dp.message(F.text == "День")
 async def start_day_planner(message: types.Message, state: FSMContext):
     await state.set_state(PlannerStates.waiting_for_tasks)
+    import asyncio
+import os
+import json
+import logging
+import gspread_asyncio
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from google.oauth2.service_account import Credentials
+from aiohttp import web
+
+# Логирование
+logging.basicConfig(level=logging.INFO)
+
+# Инициализация бота
+TOKEN = os.getenv("TOKEN")
+bot = Bot(token=TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+
+# --- GOOGLE SHEETS КОНФИГУРАЦИЯ ---
+def get_creds():
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    return Credentials.from_service_account_info(creds_dict, scopes=scopes)
+
+agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
+
+async def get_sheet():
+    agcm_client = await agcm.authorize()
+    spreadsheet = await agcm_client.open("BotData")
+    return await spreadsheet.get_worksheet(0)
+
+# --- FSM И КЛАВИАТУРЫ ---
+class PlannerStates(StatesGroup):
+    waiting_for_tasks = State()
+
+user_tasks = {}
+main_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Планер"), KeyboardButton(text="Список задач")]], resize_keyboard=True)
+planner_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="День"), KeyboardButton(text="Неделя"), KeyboardButton(text="Месяц")], [KeyboardButton(text="Назад")]], resize_keyboard=True)
+finish_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Это всё")]], resize_keyboard=True)
+
+# --- ОБРАБОТЧИКИ ---
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("Главное меню", reply_markup=main_kb)
+
+@dp.message(F.text == "Планер")
+async def show_planner(message: types.Message):
+    await message.answer("Выберите период", reply_markup=planner_kb)
+
+@dp.message(F.text == "Назад")
+async def back_to_main(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Главное меню", reply_markup=main_kb)
+
+@dp.message(F.text == "День")
+async def start_day_planner(message: types.Message, state: FSMContext):
+    await state.set_state(PlannerStates.waiting_for_tasks)
     user_tasks[message.from_user.id] = []
     await message.answer("Пиши цели. Когда закончишь, нажми 'Это всё'.", reply_markup=finish_kb)
 
@@ -71,7 +135,6 @@ async def process_day_tasks(message: types.Message, state: FSMContext):
     if message.text == "Это всё":
         tasks = user_tasks.get(message.from_user.id, [])
         sheet = await get_sheet()
-        # Очищаем старые данные (заголовки оставляем)
         await sheet.clear()
         await sheet.append_row(["task", "done"])
         for task in tasks:
@@ -106,20 +169,26 @@ async def mark_done(message: types.Message):
     except:
         await message.answer("Ошибка. Напиши: done номер")
 
-# --- ВЕБХУК ---
+# --- ВЕБХУК И СЕРВЕР ---
+async def handle_webhook(request):
+    data = await request.json()
+    update = types.Update.model_validate_json(json.dumps(data))
+    await dp.feed_update(bot, update)
+    return web.Response(text="OK")
+
 async def handle_ping(request):
     return web.Response(text="I am alive!")
 
 async def on_startup(app):
-    # Эта строчка сама регистрирует твоего бота в Telegram при каждом запуске
     webhook_url = f"{os.getenv('RENDER_EXTERNAL_URL')}/{TOKEN}"
     await bot.set_webhook(webhook_url)
-    logging.info(f"Вебхук автоматически установлен на {webhook_url}")
+    logging.info(f"Вебхук установлен на {webhook_url}")
 
 def main():
     app = web.Application()
+    app.on_startup.append(on_startup)
     app.router.add_post(f"/{TOKEN}", handle_webhook)
-    app.router.add_get("/", handle_ping)  # <--- Допиши эту строку
+    app.router.add_get("/", handle_ping)
     web.run_app(app, host='0.0.0.0', port=10000)
 
 if __name__ == "__main__":
