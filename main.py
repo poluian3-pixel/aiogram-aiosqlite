@@ -103,8 +103,8 @@ async def mark_done(message: types.Message):
 
 # --- ВЕБХУК ---
 async def handle_webhook(request):
-    text = await request.text()
-    update = types.Update.model_validate_json(text)
+    data = await request.json() # Получаем данные от Telegram
+    update = types.Update.model_validate_json(json.dumps(data))
     await dp.feed_update(bot, update)
     return web.Response(text="OK")
 
