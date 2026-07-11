@@ -109,7 +109,10 @@ async def handle_webhook(request):
     return web.Response(text="OK")
 
 async def on_startup(app):
-    await bot.set_webhook(os.getenv("RENDER_EXTERNAL_URL") + f"/{TOKEN}")
+    # Эта строчка сама регистрирует твоего бота в Telegram при каждом запуске
+    webhook_url = f"{os.getenv('RENDER_EXTERNAL_URL')}/{TOKEN}"
+    await bot.set_webhook(webhook_url)
+    logging.info(f"Вебхук автоматически установлен на {webhook_url}")
 
 def main():
     app = web.Application()
