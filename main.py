@@ -107,11 +107,8 @@ async def mark_done(message: types.Message):
         await message.answer("Ошибка. Напиши: done номер")
 
 # --- ВЕБХУК ---
-async def handle_webhook(request):
-    data = await request.json() # Получаем данные от Telegram
-    update = types.Update.model_validate_json(json.dumps(data))
-    await dp.feed_update(bot, update)
-    return web.Response(text="OK")
+async def handle_ping(request):
+    return web.Response(text="I am alive!")
 
 async def on_startup(app):
     # Эта строчка сама регистрирует твоего бота в Telegram при каждом запуске
@@ -122,6 +119,7 @@ async def on_startup(app):
 def main():
     app = web.Application()
     app.router.add_post(f"/{TOKEN}", handle_webhook)
+    app.router.add_get("/", handle_ping)  # <--- Допиши эту строку
     web.run_app(app, host='0.0.0.0', port=10000)
 
 if __name__ == "__main__":
