@@ -23,7 +23,12 @@ dp = Dispatcher(storage=MemoryStorage())
 # --- GOOGLE SHEETS КОНФИГУРАЦИЯ ---
 def get_creds():
     creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
-    return Credentials.from_service_account_info(creds_dict)
+    # Добавляем нужные области доступа (scopes)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    return Credentials.from_service_account_info(creds_dict, scopes=scopes)
 
 agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
 
