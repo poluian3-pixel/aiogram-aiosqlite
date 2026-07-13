@@ -465,13 +465,19 @@ async def process_add_focus(message: Message, state: FSMContext):
         await db.execute("INSERT OR IGNORE INTO user_focuses (user_id, focus_text) VALUES (?, ?)", (user_id, keyword))
         await db.commit()
     
-    # 2. Бекап в Google Таблицу (во вторую вкладку)
+    # 2. Бекап в Google Таблицу
     try:
         agcm_client = await agcm.authorize()
         spreadsheet = await agcm_client.open("BotData")
-        # Выбираем вторую вкладку (индекс 1)
-        focus_sheet = await spreadsheet.get_worksheet(1) 
-        await focus_sheet.append_row([user_id, keyword])
+        
+        # Берем первый лист (индекс 0) для задач, а если хочешь отдельный для фокусов — 
+        # создай в таблице второй лист и убедись, что он называется "Focuses"
+        try:
+            focus_sheet = await spreadsheet.worksheet("Focuses")
+        except:
+            focus_sheet = await spreadsheet.get_worksheet(0) # Если листа "Focuses" нет, пишет в первый
+            
+        await focus_sheet.append_row([user_id, keyword, datetime.datetime.now().isoformat()])
         logging.info(f"Фокус '{keyword}' записан в Google Таблицу")
     except Exception as e:
         logging.error(f"Не удалось записать фокус в таблицу: {e}")
@@ -678,6 +684,10 @@ async def main():
     
     scheduler.start()
     print("⏰ Фоновые таймеры (Minsk Time) успешно запущены в боевом режиме!")
+    
+    # ВАЖНО: Добавляем эту строчку перед стартом поллинга
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     print("🚀 Бот полностью готов к работе!")
     
     try:
@@ -686,4 +696,4 @@ async def main():
         await bot.session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())
