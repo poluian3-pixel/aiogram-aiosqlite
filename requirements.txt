@@ -3,3 +3,4 @@ aiosqlite
 aiohttp
 gspread-asyncio
 google-auth
+apscheduler
