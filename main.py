@@ -1,11 +1,12 @@
 import asyncio
-import os
 import json
 import logging
 import datetime
 import aiosqlite
 import random
 import gspread_asyncio
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
@@ -696,4 +697,19 @@ async def main():
         await bot.session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    async def run_with_server():
+        # Запускаем микро-сервер для Render
+        from aiohttp import web
+        import os
+        app = web.Application()
+        app.router.add_get('/', lambda r: web.Response(text="Bot is alive"))
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+        await site.start()
+        
+        # Запускаем самого бота
+        await main()
+
+    import asyncio
+    asyncio.run(run_with_server())
