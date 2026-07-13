@@ -1,24 +1,40 @@
 import asyncio
 import os
+import json
 import logging
 import datetime
 import aiosqlite
 import random
+import gspread_asyncio
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-# Планировщик для отчетов и сброса времени
+from google.oauth2.service_account import Credentials
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# Логирование
+logging.basicConfig(level=logging.INFO)
+
+# --- GOOGLE SHEETS ИНТЕГРАЦИЯ ---
+def get_creds():
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    return Credentials.from_service_account_info(creds_dict, scopes=scopes)
+
+agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
+
+async def get_sheet():
+    agcm_client = await agcm.authorize()
+    spreadsheet = await agcm_client.open("BotData")
+    return await spreadsheet.get_worksheet(0)
 
 # Настройки
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DB_PATH = "test_bot_database.db"
 
-logging.basicConfig(level=logging.INFO)
 router = Router()
 
 # Состояния FSM
@@ -81,9 +97,18 @@ async def get_user_gender(user_id: int) -> str:
             return row[0] if row else None
 
 async def add_task(user_id: int, text: str, period: str):
+    # 1. Сохраняем в локальную БД для скорости
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT INTO tasks (user_id, task_text, period) VALUES (?, ?, ?)", (user_id, text, period))
         await db.commit()
+    
+    # 2. Синхронизация с Google Таблицей как бекап
+    try:
+        sheet = await get_sheet()
+        await sheet.append_row([user_id, text, period, 0]) # 0 - статус "не выполнено"
+        logging.info(f"Задача для {user_id} успешно записана в Google Таблицу")
+    except Exception as e:
+        logging.error(f"Не удалось записать в Google Таблицу: {e}")
 
 async def get_tasks(user_id: int, period: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -435,9 +460,21 @@ async def process_add_focus(message: Message, state: FSMContext):
     keyword = message.text.strip().lower()
     user_id = message.from_user.id
     
+    # 1. Сохраняем в локальную БД
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR IGNORE INTO user_focuses (user_id, focus_text) VALUES (?, ?)", (user_id, keyword))
         await db.commit()
+    
+    # 2. Бекап в Google Таблицу (во вторую вкладку)
+    try:
+        agcm_client = await agcm.authorize()
+        spreadsheet = await agcm_client.open("BotData")
+        # Выбираем вторую вкладку (индекс 1)
+        focus_sheet = await spreadsheet.get_worksheet(1) 
+        await focus_sheet.append_row([user_id, keyword])
+        logging.info(f"Фокус '{keyword}' записан в Google Таблицу")
+    except Exception as e:
+        logging.error(f"Не удалось записать фокус в таблицу: {e}")
         
     await state.clear()
     await message.answer(f"Ключевое слово «{keyword}» успешно добавлено в фокусы!")
